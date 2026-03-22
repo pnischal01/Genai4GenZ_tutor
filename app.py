@@ -18,36 +18,27 @@ if "page" not in st.session_state:
 
 
 def run_context_compression(query):
-    """
-    Retrieves the top chunks from the FAISS database and prunes them using ScaleDown.
-    """
     try:
-        # 1. Load the FAISS database from your hard drive
         embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-        
-        # allow_dangerous_deserialization=True is required by LangChain to load local folders
         vector_store = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
-        
-        # 2. Search for the 4 most relevant chunks (paragraphs) to the user's question
         docs = vector_store.similarity_search(query, k=4)
-        
-        # 3. Combine those chunks into a single string
         retrieved_text = "\n\n".join([doc.page_content for doc in docs])
         
-        # 4. Send that highly relevant text to ScaleDown for pruning
+        # Call ScaleDown
         compressed_ctx, t_before, t_after = prune_text_with_scaledown(query, retrieved_text)
         
-        # 🚨 THE HACKATHON SAFETY NET 🚨
-        # If the ScaleDown API is down, rate-limited, or returns empty text
-        if len(str(compressed_ctx).strip()) < 25 or "No text returned" in str(compressed_ctx):
-            compressed_ctx = retrieved_text  # Bypass ScaleDown and use the pure FAISS text
-            t_after = t_before               # Tokens remain the same since we bypassed
+        # 🚨 THE SMART SAFETY NET 🚨
+        # If ScaleDown pulls that "3 token" nonsense, bypass it immediately!
+        if t_after < 10 or "No text returned" in str(compressed_ctx):
+            print("⚠️ ScaleDown returned garbage. Bypassing to save the UI.")
+            return retrieved_text, t_before, t_before # Keep tokens equal so it shows 0% saved
             
         return compressed_ctx, t_before, t_after
         
     except Exception as e:
-        # Fallback if the database hasn't been created yet
-        return f"Database Error: Please upload a textbook first. ({str(e)})", 0, 0
+        print(f"CRITICAL COMPRESSION ERROR: {str(e)}")
+        # If it fully crashes, still give the student the textbook text!
+        return retrieved_text, len(retrieved_text.split()), len(retrieved_text.split())
 
 def run_llm_generation(context, query, format_preference):
     """
