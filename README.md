@@ -4,7 +4,7 @@
 
 Gyaan.AI is an intelligent tutoring system designed to make AI-powered education accessible and affordable for students in rural India.
 
-Traditional AI tutors rely on large models, which are expensive and require high bandwidth. This project addresses that challenge by introducing context pruning, reducing token usage, cost, and latency while maintaining accurate, curriculum-based responses.
+Traditional AI tutors rely on large models with high token usage, leading to increased cost, latency, and bandwidth requirements. This project addresses these challenges by introducing context pruning, which removes irrelevant information before sending data to the language model, significantly reducing cost and improving response speed while maintaining accuracy.
 
 ---
 
@@ -35,12 +35,16 @@ This results in faster, cheaper, and bandwidth-efficient AI tutoring.
 
 ## Key Features
 
-- PDF textbook ingestion
-- FAISS-based semantic search
+- PDF textbook ingestion and processing
+- Local FAISS-based semantic search
 - Context pruning using ScaleDown API
-- Low-latency answer generation using Ollama (1B model)
-- Reduced cost per query
-- Optimized for low-bandwidth environments
+- Lightweight LLM inference using Ollama (LLaMA 3.2 1B)
+- Token usage tracking and savings display
+- Multiple answer formats (detailed, short paragraph, bullet points)
+- Chapter-wise summaries generation
+- Study roadmap generation
+- Predicted exam questions generation
+- Robust fallback handling for pruning failures
 
 ---
 
@@ -65,7 +69,20 @@ This results in faster, cheaper, and bandwidth-efficient AI tutoring.
    Pruned context is sent to Ollama to generate the final answer
 
 ---
+## Workflow Pipeline
 
+PDF Upload
+→ Text Extraction
+→ Chunking
+→ Embeddings
+→ FAISS Storage
+→ User Query
+→ Top-K Retrieval
+→ Context Pruning (ScaleDown)
+→ LLM Generation (Ollama)
+→ Final Answer
+
+---
 ## Tech Stack
 
 - Frontend: Streamlit
@@ -132,10 +149,11 @@ streamlit run app.py
 ### Usage
 
 1. Upload a textbook PDF
-
-2. Enter a question
-
-3. The system retrieves relevant content, prunes unnecessary context, and generates an answer
+2. Provide a name for the textbook
+3. Ask a question based on the content
+4. The system retrieves relevant content, prunes unnecessary context, and generates an answer
+5. View token savings and generated response
+6. Explore chapter summaries, roadmap, and predicted exam questions
 
 ### Key Innovation: Context Pruning
 
@@ -149,7 +167,7 @@ Gyaan.AI improves this by:
 
 - Improving response time
 
-- Future Improvements
+### Future Improvements
 
 - Mobile-friendly interface
 
