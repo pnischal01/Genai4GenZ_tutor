@@ -594,7 +594,7 @@ button[kind="secondary"]:hover p {
             st.rerun()
     with c4:
         st.markdown('<a href="https://github.com/pnischal01/Genai4GenZ_tutor" target="_blank"><button style="background: rgba(255,255,255,0.9); border: 2px solid rgba(124,58,237,0.3); border-radius: 50px; padding: 0.5rem 1.5rem; font-size: 1.1rem; font-weight: 800; color: #7c3aed; cursor: pointer; white-space: nowrap; width: 100%;">View GitHub Repo</button></a>', unsafe_allow_html=True)
-        
+
     # --- INTERACTIVE PREVIEW ---
     st.markdown("""
 <div class="preview-box scroll-animate">
@@ -638,10 +638,10 @@ button[kind="secondary"]:hover p {
         """, unsafe_allow_html=True)
     with s_right:
         steps = [
-            ("Local Ingestion & Indexing", "Maharashtra State Board PDFs are chunked and embedded locally using HuggingFace. No cloud costs yet."),
-            ("FAISS Top-K Retrieval", "User asks a question. We query the local vector store to pull the top 20 relevant textbook chunks."),
-            ("Context Pruning (ScaleDown API)", "The magic step. We send the chunks + query to ScaleDown. It extracts ONLY the exact sentences needed, dropping the token count by 60%+."),
-            ("Generation", "The ultra-small, highly-relevant payload is sent to GPT-4o-mini (or local Ollama) for a blazing fast, cheap answer.")
+            ("Local RAG & Knowledge Indexing", "Uploaded PDFs are locally chunked and embedded using HuggingFace. We create a dedicated FAISS vector store for every textbook without cloud overhead."),
+            ("Structural AI Ingestion", "Groq (Llama 3.1) analyzes the beginning of the book to extract a full chapter list, detailed summaries, and a custom study roadmap in one pass."),
+            ("Context Pruning (ScaleDown API)", "When you ask a question, we don't send raw chunks. ScaleDown extracts only the vital sentences, cutting irrelevant tokens by 60-70%."),
+            ("Neural Core Generation", "The ultra-compressed payload is processed by a local Llama 3.2 1B model, providing high-speed tutor responses even on spotty cellular networks.")
         ]
         for i, (title, desc) in enumerate(steps):
             st.markdown(f"""
