@@ -22,54 +22,56 @@ def process_textbook(uploaded_file):
         # 2. BUILD THE LOCAL VECTOR DATABASE (FAISS)
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         chunks = text_splitter.split_text(full_text)
-        
         embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-        
         vector_store = FAISS.from_texts(chunks, embeddings)
         vector_store.save_local("faiss_index")
         
-        # 3. GENERATE CHAPTER TILES VIA GROQ API
+        # 3. GENERATE CHAPTERS, ROADMAP, AND QUESTIONS
         toc_text = full_text[:6000]
         client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         
-        # THE "EXPANDED SUMMARY" PROMPT
         prompt = f"""
-        You are an expert educational summarizer. Extract ALL the main chapter titles from the textbook's Table of Contents below.
+        Extract the main chapter titles and create summaries for this textbook.
         
-        CRITICAL INSTRUCTIONS:
-        1. Find the dedicated "Table of Contents" or "Contents" page.
-        2. Extract EVERY main chapter title exactly as written (e.g., I. Title, II. Title).
-        3. STRICT STOP: Once you reach the end of the Table of Contents list, STOP. DO NOT extract sub-headings from the body pages.
-        4. Ensure there are NO duplicate chapters and the numbering is strictly sequential.
-        5. Write a HIGHLY DETAILED, comprehensive educational summary (exactly 2 large paragraphs) for EVERY chapter you extract. Each paragraph MUST be at least 3 to 4 sentences long, explaining the core concepts, historical context, and key takeaways.
-        6. Output ONLY a valid JSON object. No markdown formatting (like ```json), no introductory text.
+        STRICT RULES:
+        1. Only extract main titles from the Table of Contents.
+        2. Write ONE dense paragraph (4 sentences) per chapter.
+        3. Create a 4-step 'roadmap' and 5 'exam_questions'.
+        4. Output ONLY valid JSON. No conversational text. No markdown.
         
-        Example JSON format:
+        JSON STRUCTURE:
         {{
-            "I. Exact Chapter Name": [
-                "First highly detailed paragraph explaining the core themes, historical context, and background of this chapter (at least 3-4 sentences long)...",
-                "Second highly detailed paragraph explaining the key events, impacts, and major takeaways students will learn (at least 3-4 sentences long)..."
-            ]
+            "chapters": {{ "Title": ["Summary paragraph"] }},
+            "roadmap": ["Step 1", "Step 2", "Step 3", "Step 4"],
+            "exam_questions": ["Q1", "Q2", "Q3", "Q4", "Q5"]
         }}
         
-        Textbook Front Matter:
+        Textbook Content:
         {toc_text}
         """
 
-        # Call Groq
         response = client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.1-8b-instant",
-            temperature=0.2, # Bumped up slightly to give it creative freedom to write longer sentences
+            temperature=0.1,
+            max_tokens=4000
         )
         
-        # Clean up the response to ensure perfect JSON parsing
-        raw_response = response.choices[0].message.content
-        cleaned_json = raw_response.strip().replace('```json', '').replace('```', '')
-        dynamic_lessons = json.loads(cleaned_json)
+        raw_content = response.choices[0].message.content
+        
+        # 🚨 THE NUCLEAR CLEANER: Rips out anything that isn't the JSON block
+        try:
+            start_idx = raw_content.find('{')
+            end_idx = raw_content.rfind('}') + 1
+            json_str = raw_content[start_idx:end_idx]
+            dynamic_lessons = json.loads(json_str)
+        except Exception:
+            # Fallback if cleaning fails
+            cleaned_json = raw_content.strip().replace('```json', '').replace('```', '')
+            dynamic_lessons = json.loads(cleaned_json)
         
         return dynamic_lessons
 
     except Exception as e:
         print(f"Ingestion Error: {e}")
-        return {"Error Processing Book": [f"Details: {str(e)}", "Check terminal for more info."]}
+        return {"Error Processing Book": [f"Details: {str(e)}", "Please try a different section or shorter name."]}

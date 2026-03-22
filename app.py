@@ -5,37 +5,66 @@ from ingest import process_textbook
 # Add these to your imports at the top of app.py
 import requests
 import json
+from langchain_community.vectorstores import FAISS
+from langchain_huggingface import HuggingFaceEmbeddings
 
 
 # ================= INITIALIZATION =================
 # This MUST be the very first Streamlit command!
-st.set_page_config(page_title="Gyaan AI | Rural Tutor", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Gyaan AI", layout="wide", initial_sidebar_state="expanded")
 
 if "page" not in st.session_state:
     st.session_state.page = "front"
-# ==================================================
 
 
 def run_context_compression(query):
     """
-    Retrieves the textbook text from session state and prunes it using ScaleDown.
+    Retrieves the top chunks from the FAISS database and prunes them using ScaleDown.
     """
-    # Pull the text saved in ingest.py
-    full_text = st.session_state.get('raw_textbook_content', "No textbook content available.")
-    
-    # Send it to your pruner (ScaleDown API)
-    # This is where the compression happens!
-    compressed_ctx, t_before, t_after = prune_text_with_scaledown(query, full_text)
-    
-    return compressed_ctx, t_before, t_after
+    try:
+        # 1. Load the FAISS database from your hard drive
+        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        
+        # allow_dangerous_deserialization=True is required by LangChain to load local folders
+        vector_store = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
+        
+        # 2. Search for the 4 most relevant chunks (paragraphs) to the user's question
+        docs = vector_store.similarity_search(query, k=4)
+        
+        # 3. Combine those chunks into a single string
+        retrieved_text = "\n\n".join([doc.page_content for doc in docs])
+        
+        # 4. Send that highly relevant text to ScaleDown for pruning
+        compressed_ctx, t_before, t_after = prune_text_with_scaledown(query, retrieved_text)
+        
+        # 🚨 THE HACKATHON SAFETY NET 🚨
+        # If the ScaleDown API is down, rate-limited, or returns empty text
+        if len(str(compressed_ctx).strip()) < 25 or "No text returned" in str(compressed_ctx):
+            compressed_ctx = retrieved_text  # Bypass ScaleDown and use the pure FAISS text
+            t_after = t_before               # Tokens remain the same since we bypassed
+            
+        return compressed_ctx, t_before, t_after
+        
+    except Exception as e:
+        # Fallback if the database hasn't been created yet
+        return f"Database Error: Please upload a textbook first. ({str(e)})", 0, 0
 
-def run_llm_generation(context, query):
+def run_llm_generation(context, query, format_preference):
     """
     Sends the PRUNED context and the user question to Ollama using the high-speed 1b model.
     """
     url = "http://localhost:11434/api/generate"
     
-    # This strict prompt stops the "XML" and "API Error" hallucinations
+    # 1. Translate the dropdown choice into a STRICT AI command
+    format_instruction = ""
+    if format_preference == "Short Paragraph":
+        format_instruction = "Provide a brief, concise answer in a single short paragraph."
+    elif format_preference == "Bullet Points":
+        format_instruction = "Provide the answer strictly as a vertical bulleted list. You MUST start every single bullet point on a NEW line. Example:\n- First point\n- Second point\n- Third point"
+    else:
+        format_instruction = "Provide a highly detailed, comprehensive explanation with well-spaced paragraphs."
+    
+    # 2. Inject the command into the prompt
     prompt = f"""
     [SYSTEM: YOU ARE A TEXTBOOK TUTOR. ONLY USE THE PROVIDED CONTEXT. DO NOT USE EXTERNAL KNOWLEDGE. DO NOT TALK ABOUT XML OR API ERRORS.]
     
@@ -46,6 +75,7 @@ def run_llm_generation(context, query):
     {query}
     
     INSTRUCTION: Answer the question using ONLY the context above. If the answer is not there, say "I'm sorry, that isn't covered in this chapter." 
+    FORMAT REQUIREMENT: {format_instruction}
     
     ANSWER:
     """
@@ -79,17 +109,18 @@ input, textarea, [data-baseweb="base-input"] {
     -webkit-text-fill-color: #000000 !important;
 }
                 
-                .answer-box {
-    line-height: 1.7; 
-    padding: 20px; 
-    background: #ffffff; 
-    border-radius: 12px; 
-    border-left: 5px solid #7c3aed;
-    color: #1e293b;
-    font-size: 1.1rem;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    margin-top: 10px;
-}
+               .answer-box {
+            line-height: 1.7; 
+            padding: 20px; 
+            background: #ffffff; 
+            border-radius: 12px; 
+            border-left: 5px solid #7c3aed;
+            color: #1e293b;
+            font-size: 1.1rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            margin-top: 10px;
+            white-space: pre-wrap;  /* <--- THIS FIXES THE SQUISHED TEXT! */
+        }
         
         /* Global Background Gradient */
         .stApp {
@@ -220,7 +251,7 @@ input, textarea, [data-baseweb="base-input"] {
                 qa_status.markdown("🧠 **Step 2/2: Generating Tutor response (Ollama 1B)...**")
                 
                 # This calls your Ollama local engine
-                answer = run_llm_generation(context, query)
+                answer = run_llm_generation(context, query, answer_format)
                 qa_progress.progress(90)
                 
                 # --- STEP 3: Finalizing (90% to 100%) ---
@@ -244,7 +275,23 @@ input, textarea, [data-baseweb="base-input"] {
                 qa_progress.empty()
                 qa_status.empty()
                 st.error(f"An error occurred: {e}")
-
+            # --- EXAM PREP POP-UP ---
+        st.markdown("<hr style='margin: 40px 0 20px 0; border-top: 1px solid #e2e8f0;'>", unsafe_allow_html=True)
+        st.markdown("<h3>📝 Exam Preparation</h3>", unsafe_allow_html=True)
+        
+        if st.session_state.get('book_uploaded'):
+            data = st.session_state.get('lesson_summaries', {})
+            exam_questions = data.get('exam_questions', [])
+            
+            with st.expander("🏆 Click to View Predicted Exam Questions"):
+                st.markdown("#### High-Probability Exam Topics:")
+                if exam_questions:
+                    for i, q in enumerate(exam_questions):
+                        st.markdown(f"**{i+1}.** {q}")
+                else:
+                    st.write("No questions generated for this document.")
+        else:
+            st.info("Upload a book to generate practice exams.")
 
     with col_spacer:
         # This just adds physical empty space between the two big white boxes
@@ -255,23 +302,34 @@ input, textarea, [data-baseweb="base-input"] {
         st.markdown("<h3>Lesson Summaries</h3>", unsafe_allow_html=True)
         
         if st.session_state.get('book_uploaded'):
-            lessons = st.session_state['lesson_summaries']
+            data = st.session_state['lesson_summaries']
             
-            for title, summary in lessons.items():
-                with st.expander(title): 
-                    # 1. Check if the AI gave us a list of paragraphs
-                    if isinstance(summary, list):
-                        # Join the list together with double line breaks
-                        formatted_summary = "\n\n".join(str(p) for p in summary)
-                        
-                    # 2. Otherwise, treat it as a string
-                    else:
-                        formatted_summary = str(summary).replace('\n', '\n\n')
-                        
-                    # Display it properly formatted
-                    st.markdown(formatted_summary)
+            # PROPERLY CATCH THE ERROR
+            if "Error Processing Book" in data:
+                st.error("⚠️ AI Processing Error")
+                st.write(data["Error Processing Book"][0])
+                st.write(data["Error Processing Book"][1])
+            else:
+                # 1. Pull out just the chapters
+                chapters = data.get('chapters', {})
+                
+                for title, summary in chapters.items():
+                    with st.expander(title): 
+                        if isinstance(summary, list):
+                            formatted_summary = "\n\n".join(str(p) for p in summary)
+                        else:
+                            formatted_summary = str(summary).replace('\n', '\n\n')
+                        st.markdown(formatted_summary)
+                
+                # 2. Add the Roadmap below the chapters
+                st.markdown("<br><hr>", unsafe_allow_html=True)
+                st.markdown("<h3 style='color: #7c3aed !important;'>🗺️ Study Roadmap</h3>", unsafe_allow_html=True)
+                roadmap = data.get('roadmap', [])
+                
+                for step in roadmap:
+                    st.info(step)
         else:
-            st.info("Upload a book to see summaries.")
+            st.info("Upload a book to see summaries and roadmaps.")
 # ================= FRONT PAGE DESIGN =================
 def landing_page():
     # --- EXTERNAL ASSETS (Fonts & Icons) ---
